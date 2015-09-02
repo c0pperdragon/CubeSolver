@@ -1,0 +1,1130 @@
+
+#include "motorcontrol.h"
+#include "filereader.h"
+
+
+// colors of the cube
+#define COLOR_WHITE   0
+#define COLOR_YELLOW  1
+#define COLOR_GREEN   2
+#define COLOR_BLUE    3
+#define COLOR_ORANGE  4
+#define COLOR_RED     5
+const string colorletters = "WYGBOR?";
+
+// sequence of faces in array: all faces in clockwise order
+#define Uf  0
+#define Ulf 1
+#define Ul  2
+#define Ulb 3
+#define Ub  4
+#define Urb 5
+#define Ur  6
+#define Urf 7
+#define Df  8
+#define Drf 9
+#define Dr  10
+#define Drb 11
+#define Db  12
+#define Dlb 13
+#define Dl  14
+#define Dlf 15
+#define Fu  16
+#define Fur 17
+#define Fr  18
+#define Fdr 19
+#define Fd  20
+#define Fdl 21
+#define Fl  22
+#define Ful 23
+#define Bu  24
+#define Bul 25
+#define Bl  26
+#define Bdl 27
+#define Bd  28
+#define Bdr 29
+#define Br  30
+#define Bur 31
+#define Lu  32
+#define Luf 33
+#define Lf  34
+#define Ldf 35
+#define Ld  36
+#define Ldb 37
+#define Lb  38
+#define Lub 39
+#define Ru  40
+#define Rub 41
+#define Rb  42
+#define Rdb 43
+#define Rd  44
+#define Rdf 45
+#define Rf  46
+#define Ruf 47
+
+// -------------- small toolbox ------
+void printstatus(string s)
+{
+    ResetScreen();
+    TextOut (0, LCD_LINE8, s);
+}
+
+string time2str(string label, int tenthseconds)
+{
+    return StrCat(label, NumToStr(tenthseconds/10),".",NumToStr(tenthseconds%10));
+}
+
+void trace(int i)
+{   ResetScreen();
+    TextOut(0, LCD_LINE1, "trace");
+    NumOut(0, LCD_LINE2, i);
+    Wait(2000);
+}
+
+// ----------------------- SCANNING SUBSYSTEM -------------------
+
+int allhues[6*8];
+byte allcolors[6*8];
+
+void copy_hues(int i0, int i1, int i2, int i3, int i4, int i5, int i6, int i7)
+{
+    allhues[i0] = scan_hues[0];
+    allhues[i1] = scan_hues[1];
+    allhues[i2] = scan_hues[2];
+    allhues[i3] = scan_hues[3];
+    allhues[i4] = scan_hues[4];
+    allhues[i5] = scan_hues[5];
+    allhues[i6] = scan_hues[6];
+    allhues[i7] = scan_hues[7];
+}
+
+void faceturn4(byte t1, byte t2, byte t3, byte t4, int p1, int p2)
+{
+    faceturn3(t1,t2,t3);
+    faceturn3(t2,t3,t4);
+    faceturn3(t3,t4,p1);
+    faceturn3(t4,p1,p2);
+}
+
+void scan_faces()
+{
+    turn_on_scanner();
+
+    for (int i=0; i<48; i++)
+    {   allcolors[i]=6;
+    }
+
+     scan_top_face();
+     copy_hues (Ur, Urb, Ub, Ulb, Ul, Ulf, Uf, Urf);
+     faceturn4(FACETURN_B, FACETURN_Fi, FACETURN_Li, FACETURN_R,    FACETURN_B, FACETURN_Fi);
+
+     scan_top_face();
+     copy_hues (Fd, Fdr, Rb, Fur, Fu, Ful, Rf, Fdl);
+     faceturn4(FACETURN_B, FACETURN_Fi, FACETURN_L, FACETURN_Ri,    FACETURN_B, FACETURN_F);
+
+     scan_top_face();
+     copy_hues (Bl, Rub, Ru, Ruf, Br, Rdf, Rd, Rdb);
+     faceturn4(FACETURN_B, FACETURN_Fi, FACETURN_Li, FACETURN_R,    FACETURN_B, FACETURN_Fi);
+
+     scan_top_face();
+     copy_hues (Dl, Dlb, Db, Drb, Dr, Drf, Df, Dlf);
+     faceturn4(FACETURN_B, FACETURN_Fi, FACETURN_L, FACETURN_Ri,    FACETURN_B, FACETURN_Fi);
+
+     scan_top_face();
+     copy_hues (Bu, Bur, Lb, Bdr, Bd, Bdl, Lf, Bul);
+     faceturn4(FACETURN_B, FACETURN_Fi, FACETURN_Li, FACETURN_R,     FACETURN_R, FACETURN_R);
+
+     scan_top_face();
+     copy_hues (Fr, Luf, Lu, Lub, Fl, Ldb, Ld, Ldf);
+
+    turn_off_scanner();
+}
+
+void decodecolors()
+{
+    for (int i=0; i<6*8; i++)
+    {
+        int H = allhues[i];
+        if (H<0)
+        {  allcolors[i] = COLOR_WHITE;
+        }
+        else
+        {   if (H>300 || H<=7)
+            {    allcolors[i] = COLOR_RED;
+            }
+            else if (H<40)
+            {    allcolors[i] = COLOR_ORANGE;
+            }
+            else if (H<90)
+            {    allcolors[i] = COLOR_YELLOW;
+            }
+            else if (H<180)
+            {    allcolors[i] = COLOR_GREEN;
+            }
+            else
+            {   allcolors[i] = COLOR_BLUE;
+            }
+        }
+    }
+}
+
+void correct_orangered_on_corner(int a, int b, int c)
+{
+    if (allcolors[a]==COLOR_RED || allcolors[a]==COLOR_ORANGE)
+    {  // already correctly sorted
+    }
+    else if (allcolors[b]==COLOR_RED || allcolors[b]==COLOR_ORANGE)
+    {   int x = a;
+        a=b;
+        b=c;
+        c=x;
+    }
+    else if (allcolors[c]==COLOR_RED || allcolors[c]==COLOR_ORANGE)
+    {   int x = a;
+        a = c;
+        c = b;
+        b = x;
+    }
+    else
+    {   return;   // no orange or red on corner - this is a error that can not be corrected here
+    }
+    
+    byte c1 = allcolors[b];
+    byte c2 = allcolors[c];
+    if ( (c1==COLOR_WHITE  && c2==COLOR_GREEN)
+    ||   (c1==COLOR_GREEN  && c2==COLOR_YELLOW)
+    ||   (c1==COLOR_YELLOW && c2==COLOR_BLUE)
+    ||   (c1==COLOR_BLUE   && c2==COLOR_WHITE)
+    )
+    {    allcolors[a] = COLOR_ORANGE;
+    }
+    else
+    {    allcolors[a] = COLOR_RED;
+    }
+}
+
+int position_of_other_edge_face(int thisface)
+{
+    switch (thisface)
+    {
+    case Uf: return Fu;
+    case Ul: return Lu;
+    case Ub: return Bu;
+    case Ur: return Ru;
+    case Df: return Fd;
+    case Dr: return Rd;
+    case Db: return Bd;
+    case Dl: return Ld;
+    case Fu: return Uf;
+    case Fr: return Rf;
+    case Fd: return Df;
+    case Fl: return Lf;
+    case Bu: return Ub;
+    case Bl: return Lb;
+    case Bd: return Db;
+    case Br: return Rb;
+    case Lu: return Ul;
+    case Lf: return Fl;
+    case Ld: return Dl;
+    case Lb: return Bl;
+    case Ru: return Ur;
+    case Rb: return Br;
+    case Rd: return Dr;
+    case Rf: return Fr;
+    }
+    return -1;
+}
+
+int find_orangered_edge(byte othercolor, byte nthoccurence)
+{
+   byte count=0;
+   for (int i=0; i<48; i++)
+   {   int j = position_of_other_edge_face(i);
+       if (j<0) continue;
+       if (allcolors[i]==othercolor && (allcolors[j]==COLOR_RED || allcolors[j]==COLOR_ORANGE))
+       {  if (nthoccurence==count) return j;
+          count++;
+       }
+   }
+   return -1;
+}
+
+void correct_orangered()
+{
+    correct_orangered_on_corner(Urf, Ruf, Fur);
+    correct_orangered_on_corner(Ulf, Ful, Luf);
+    correct_orangered_on_corner(Ulb, Lub, Bul);
+    correct_orangered_on_corner(Urb, Bur, Rub);
+    correct_orangered_on_corner(Drf, Fdr, Rdf);
+    correct_orangered_on_corner(Dlf, Ldf, Fdl);
+    correct_orangered_on_corner(Dlb, Bdl, Ldb);
+    correct_orangered_on_corner(Drb, Rdb, Bdr);
+
+    for (byte c=0; c<6; c++)
+    {   if (c==COLOR_RED || c==COLOR_ORANGE) continue;
+    
+        int a = find_orangered_edge(c, 0);
+        int b = find_orangered_edge(c, 1);
+        if (a<0 || b<0) continue;
+        if (allcolors[a]!=allcolors[b]) continue;
+        
+        if ( (allhues[a]+180)%360 > (allhues[b]+180)%360 )
+        {   allcolors[a] = COLOR_ORANGE;
+            allcolors[b] = COLOR_RED;
+        } else
+        {   allcolors[b]= COLOR_ORANGE;
+            allcolors[a] = COLOR_RED;
+        }
+    }
+}
+
+
+void displaycolors()
+{
+     for (int f=0; f<6; f++)
+     {   for (int i=0; i<8; i++)
+         {   int c = allcolors[f*8+i];
+             TextOut(10*i, 56-8*f, SubStr(colorletters, c, 1));
+         }
+     }
+     for (int c=0; c<6; c++)
+    {   int count = 0;
+        for (int i=0; i<48; i++)
+        {   if (allcolors[i]==c)
+            {   count++;
+            }
+            NumOut(85, 56-8*c, count);
+        }
+    }
+}
+
+bool scan()
+{
+    scan_faces();
+    decodecolors();
+    correct_orangered();
+
+    for (int c=0; c<6; c++)
+    {   int count=0;
+        for (int i=0; i<48; i++)
+        {   if (allcolors[i]==c)
+            {   count++;
+            }
+        }
+        if (count!=8) return false;
+    }
+    return true;
+}
+
+
+// --------------- SOLVER SUBSYSTEM --------------
+
+#define ulf 7
+#define urf 6
+#define urb 5
+#define ulb 4
+#define dlb 3    // LL-corners are in clockwise order
+#define drb 2
+#define drf 1
+#define dlf 0
+
+#define ul  11
+#define uf  10
+#define lf  9
+#define rf  8
+#define ur  7
+#define rb  6
+#define ub  5
+#define lb  4
+#define db  3     // LL-edges are in clockwise order
+#define dr  2
+#define df  1
+#define dl  0
+
+
+byte cornercubiecolors[] = {
+     COLOR_YELLOW,COLOR_ORANGE,COLOR_GREEN,    // dlf
+     COLOR_YELLOW,COLOR_GREEN,COLOR_RED,       // drf
+     COLOR_YELLOW,COLOR_RED,COLOR_BLUE,        // drb
+     COLOR_YELLOW,COLOR_BLUE,COLOR_ORANGE,     // dlb
+     COLOR_WHITE,COLOR_ORANGE,COLOR_BLUE,      // ulb
+     COLOR_WHITE,COLOR_BLUE,COLOR_RED,         // urb
+     COLOR_WHITE,COLOR_RED,COLOR_GREEN,        // urf
+     COLOR_WHITE,COLOR_GREEN,COLOR_ORANGE      // ulf
+};
+byte cornercubiefaces[] = {
+     Dlf,Ldf,Fdl,              // dlf
+     Drf,Fdr,Rdf,              // drf
+     Drb,Rdb,Bdr,              // drb
+     Dlb,Bdl,Ldb,              // dlb
+     Ulb,Lub,Bul,              // ulb
+     Urb,Bur,Rub,              // urb
+     Urf,Ruf,Fur,              // urf
+     Ulf,Ful,Luf               // ulf
+};
+byte edgecubiecolors[] = {
+     COLOR_ORANGE,COLOR_YELLOW,   // dl
+     COLOR_YELLOW,COLOR_GREEN,    // df
+     COLOR_RED,COLOR_YELLOW,      // dr
+     COLOR_YELLOW,COLOR_BLUE,     // db
+     COLOR_ORANGE,COLOR_BLUE,     // lb
+     COLOR_WHITE, COLOR_BLUE,     // ub
+     COLOR_RED,COLOR_BLUE,        // rb
+     COLOR_RED,COLOR_WHITE,       // ur
+     COLOR_RED,COLOR_GREEN,       // rf
+     COLOR_ORANGE,COLOR_GREEN,    // lf
+     COLOR_WHITE,COLOR_GREEN,     // uf
+     COLOR_ORANGE,COLOR_WHITE     // ul
+};
+byte edgecubiefaces[] = {
+     Ld, Dl,   // dl
+     Df, Fd,   // df
+     Rd, Dr,   // dr
+     Db, Bd,   // db
+     Lb, Bl,   // lb
+     Ub, Bu,   // ub
+     Rb, Br,   // rb
+     Ru, Ur,   // ur
+     Rf, Fr,   // rf
+     Lf, Fl,   // lf
+     Uf, Fu,   // uf
+     Lu, Ul,   // ul
+};
+
+
+
+byte corners[8];
+byte edges[12];
+
+byte solution[100];
+int solutionlength;
+
+byte bestsolution[100];
+
+
+
+byte ll_perm_groups[] = {
+0,1,1,1,1,2,1,1,3,2,1,1,
+4,5,6,7,8,5,9,10,7,9,4,8,
+8,4,7,5,5,10,7,4,8,6,9,9,
+4,4,10,9,8,5,7,6,7,9,5,8,
+8,9,4,7,9,10,5,7,8,6,4,5,
+11,12,13,11,14,11,11,13,12,12,12,14,
+8,5,9,4,4,10,9,5,8,6,7,7,
+9,9,6,4,8,7,5,10,5,4,7,8,
+8,4,9,5,4,6,7,5,8,10,9,7,
+1,1,2,1,0,1,1,2,1,1,1,3,
+14,12,12,12,11,13,11,11,14,13,11,12,
+5,4,6,9,8,4,7,10,9,7,5,8,
+8,7,4,9,9,6,4,7,8,10,5,5,
+7,7,6,5,8,9,4,10,4,5,9,8,
+8,5,7,4,5,6,9,4,8,10,7,9,
+12,11,13,12,14,12,12,13,11,11,11,14,
+3,1,1,1,1,2,1,1,0,2,1,1,
+7,9,10,4,8,9,5,6,4,5,7,8,
+14,11,11,11,12,13,12,12,14,13,12,11,
+9,7,10,5,8,7,4,6,5,4,9,8,
+8,9,5,7,7,6,5,9,8,10,4,4,
+5,5,10,7,8,4,9,6,9,7,4,8,
+8,7,5,9,7,10,4,9,8,6,5,4,
+1,1,2,1,3,1,1,2,1,1,1,0
+};
+byte ll_perm_initialtwist[] = {
+0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,
+1,1,1,1,1,1,1,1,1,1,1,1,
+0,0,0,0,0,0,0,0,0,0,0,0,
+3,3,3,3,3,3,3,3,3,3,3,3,
+0,0,0,2,0,0,2,0,2,2,0,0,
+1,1,1,1,1,1,1,1,1,1,1,1,
+2,2,2,2,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,3,1,1,1,3,1,1,1,3,3,
+0,0,0,0,0,0,0,0,0,0,0,0,
+3,3,3,3,3,3,3,3,3,3,3,3,
+2,2,2,2,2,2,2,2,2,2,2,2,
+1,1,1,1,1,1,1,1,1,1,1,1,
+0,0,0,2,0,0,2,0,2,2,0,0,
+2,2,2,2,2,2,2,2,2,2,2,2,
+2,2,2,2,2,2,2,2,2,2,2,2,
+1,1,3,1,1,1,3,1,1,1,3,3,
+2,2,2,2,2,2,2,2,2,2,2,2,
+3,3,3,3,3,3,3,3,3,3,3,3,
+0,0,0,0,0,0,0,0,0,0,0,0,
+3,3,3,3,3,3,3,3,3,3,3,3,
+3,3,3,3,3,3,3,3,3,3,3,3
+};
+byte ll_perm_sequencesym[] = {
+0,0,5,2,3,0,6,1,0,1,4,7,
+0,0,0,0,0,7,0,0,7,7,7,7,
+6,1,1,6,1,1,6,6,1,1,6,1,
+4,3,3,4,3,3,4,3,3,3,4,4,
+2,2,2,2,5,2,2,5,5,2,5,5,
+0,0,0,1,0,2,3,4,1,3,2,4,
+4,4,3,3,4,3,4,3,3,3,4,3,
+1,6,1,1,6,1,6,1,1,6,6,1,
+7,7,7,0,0,0,0,7,0,0,0,7,
+7,4,1,0,0,5,2,0,3,1,6,0,
+4,2,3,0,0,0,1,2,0,4,3,1,
+5,5,2,2,2,2,2,2,5,5,2,5,
+1,6,6,6,1,1,1,1,6,1,6,1,
+3,4,3,4,4,3,3,3,4,3,4,3,
+5,2,5,5,5,2,2,2,2,2,2,5,
+1,3,5,2,1,3,0,1,0,2,1,5,
+0,6,1,4,7,1,0,5,0,0,2,3,
+7,0,0,7,7,7,0,0,0,7,0,0,
+5,1,2,3,1,5,2,3,1,1,0,0,
+5,2,2,2,5,5,5,2,5,2,2,2,
+3,4,3,4,3,3,4,3,4,3,3,4,
+1,6,1,6,1,6,6,1,1,1,1,6,
+0,0,7,0,7,0,7,7,7,0,0,0,
+3,2,0,6,0,1,4,1,7,5,0,0
+};
+
+
+inline byte FLIP(byte edgecubie)
+{
+		return (edgecubie ^ 0x10);
+}
+inline byte CW(byte cornercubie)
+{
+ 	 return ((cornercubie +  0x10) % 0x30);
+}
+inline byte CCW(byte cornercubie)
+{
+	return ((cornercubie +  0x20) % 0x30);
+}
+
+void turn(byte t)
+{
+		byte x;
+#define swap(a,b)  x=a; a=b; b=x;
+
+		switch (t)
+		{
+		// turning down face does flip edges, but not rotate corners
+		case FACETURN_D:
+			   x = corners[drb];  corners[drb] = corners[drf];  corners[drf] = corners[dlf];  corners[dlf] = corners[dlb];  corners[dlb] = x;
+		     x = edges[df];  edges[df] = FLIP(edges[dl]);  edges[dl] = FLIP(edges[db]);  edges[db] = FLIP(edges[dr]);  edges[dr] = FLIP(x);
+         break;
+		case FACETURN_D2:
+			   swap(corners[drf],corners[dlb]);
+ 			   swap(corners[dlf],corners[drb]);
+         swap(edges[dl],edges[dr]);
+         swap(edges[df],edges[db]);
+         break;
+		case FACETURN_Di:
+         x = corners[drf];  corners[drf] = corners[drb];  corners[drb] = corners[dlb];  corners[dlb] = corners[dlf];  corners[dlf] = x;
+		     x = edges[df]; edges[df] = FLIP(edges[dr]); edges[dr] = FLIP(edges[db]);  edges[db] = FLIP(edges[dl]);  edges[dl] = FLIP(x);
+         break;
+
+    // turning left/right face rotates corners, but not flips edges
+    case FACETURN_L:
+        x = corners[ulf];  corners[ulf] = CW(corners[ulb]);  corners[ulb] = CCW(corners[dlb]);  corners[dlb] = CW(corners[dlf]);  corners[dlf] = CCW(x);
+        x = edges[lf];  edges[lf] = edges[ul]; edges[ul] = edges[lb]; edges[lb] = edges[dl]; edges[dl] = x;
+        break;
+		case FACETURN_L2:
+			  swap(corners[dlf],corners[ulb]);
+ 			  swap(corners[dlb],corners[ulf]);
+        swap(edges[dl],edges[ul]);
+        swap(edges[lf],edges[lb]);
+			  break;
+ 		case FACETURN_Li:
+        x = corners[ulb]; corners[ulb] = CCW(corners[ulf]); corners[ulf] = CW(corners[dlf]); corners[dlf] = CCW(corners[dlb]); corners[dlb] = CW(x);
+        x = edges[lf]; edges[lf] = edges[dl]; edges[dl] = edges[lb]; edges[lb] = edges[ul]; edges[ul] = x;
+        break;
+		case FACETURN_R:
+        x = corners[urb]; corners[urb] = CW(corners[urf]); corners[urf] = CCW(corners[drf]); corners[drf] = CW(corners[drb]); corners[drb] = CCW(x);
+			  x = edges[rf]; edges[rf] = edges[dr]; edges[dr] = edges[rb]; edges[rb] = edges[ur]; edges[ur] = x;
+        break;
+		case FACETURN_R2:
+			  swap(corners[drf],corners[urb]);
+ 			  swap(corners[drb],corners[urf]);
+        swap(edges[dr],edges[ur]);
+        swap(edges[rf],edges[rb]);
+			  break;
+		case FACETURN_Ri:
+        x = corners[urf];  corners[urf] = CCW(corners[urb]);  corners[urb] = CW(corners[drb]); corners[drb] = CCW(corners[drf]); corners[drf] = CW(x);
+   	    x = edges[rf]; edges[rf] = edges[ur]; edges[ur] = edges[rb]; edges[rb] = edges[dr]; edges[dr] = x;
+        break;
+
+    // turning front/back faces rotates corners, but not flip edges
+		case FACETURN_F:
+        x = corners[urf]; corners[urf] = CW(corners[ulf]); corners[ulf] = CCW(corners[dlf]); corners[dlf] = CW(corners[drf]); corners[drf] = CCW(x);
+        x = edges[lf]; edges[lf] = edges[df]; edges[df] = edges[rf]; edges[rf] = edges[uf]; edges[uf] = x;
+        break;
+		case FACETURN_F2:
+			  swap(corners[drf],corners[ulf]);
+ 			  swap(corners[dlf],corners[urf]);
+        swap(edges[df],edges[uf]);
+        swap(edges[rf],edges[lf]);
+			  break;
+		case FACETURN_Fi:
+        x = corners[ulf]; corners[ulf] = CCW(corners[urf]); corners[urf] = CW(corners[drf]); corners[drf] = CCW(corners[dlf]); corners[dlf] = CW(x);
+        x = edges[lf]; edges[lf] = edges[uf]; edges[uf] = edges[rf]; edges[rf] = edges[df]; edges[df] = x;
+        break;
+		case FACETURN_B:
+        x = corners[ulb]; corners[ulb] = CW(corners[urb]); corners[urb] = CCW(corners[drb]); corners[drb] = CW(corners[dlb]); corners[dlb] = CCW(x);
+        x = edges[lb]; edges[lb] = edges[ub]; edges[ub] = edges[rb]; edges[rb] = edges[db]; edges[db] = x;
+        break;
+		case FACETURN_B2:
+			  swap(corners[drb],corners[ulb]);
+ 			  swap(corners[dlb],corners[urb]);
+        swap(edges[db],edges[ub]);
+        swap(edges[rb],edges[lb]);
+			  break;
+		case FACETURN_Bi:
+        x = corners[urb]; corners[urb] = CCW(corners[ulb]); corners[ulb] = CW(corners[dlb]);  corners[dlb] = CCW(corners[drb]); corners[drb] = CW(x);
+        x = edges[lb]; edges[lb] = edges[db]; edges[db] = edges[rb]; edges[rb] = edges[ub]; edges[ub] = x;
+        break;
+		}
+}
+
+// rotate whole cube clockwise and re-color cubies so that a solved cube still looks the same
+byte corner_recolor1(byte cubie)
+{
+		byte twist = cubie&0x30;
+		switch (cubie&0x0f)
+		{
+		case ulf:  return (twist + ulb);
+		case urb:  return (twist + urf);
+		case dlb:  return (twist + drb);
+		case drf:  return (twist + dlf);
+		case ulb:  return (twist + urb);
+		case urf:  return (twist + ulf);
+		case dlf:  return (twist + dlb);
+		case drb:  return (twist + drf);
+		default: return -1;
+		}
+}
+byte edge_recolor1(byte cubie)
+{
+		byte flip = cubie&0x30;
+		switch (cubie&0x0f)
+		{
+		case ul: return (flip + ub);
+		case ur: return (flip + uf);
+		case dr: return (flip + df);
+		case dl: return (flip + db);
+		case uf: return (flip + ul);
+		case ub: return (flip + ur);
+		case db: return (flip + dr);
+		case df: return (flip + dl);
+		case lf: return (flip + lb);
+		case lb: return (flip + rb);
+		case rb: return (flip + rf);
+		case rf: return (flip + lf);
+		default: return -1;
+		}
+}
+void rotate_and_recolor_cube()
+{
+		byte _ulf = corner_recolor1(corners[urf]);
+		corners[urf] = corner_recolor1(corners[urb]);
+		corners[urb] = corner_recolor1(corners[ulb]);
+		corners[ulb] = corner_recolor1(corners[ulf]);
+		corners[ulf] = _ulf;
+		byte _dlb = corner_recolor1(corners[dlf]);
+		corners[dlf] = corner_recolor1(corners[drf]);
+		corners[drf] = corner_recolor1(corners[drb]);
+		corners[drb] = corner_recolor1(corners[dlb]);
+		corners[dlb] = _dlb;
+
+		byte _ul = edge_recolor1(edges[uf]);
+		edges[uf] = edge_recolor1(edges[ur]);
+		edges[ur] = edge_recolor1(edges[ub]);
+		edges[ub] = edge_recolor1(edges[ul]);
+		edges[ul] = _ul;
+		byte _dl = edge_recolor1(edges[df]);
+		edges[df] = edge_recolor1(edges[dr]);
+		edges[dr] = edge_recolor1(edges[db]);
+		edges[db] = edge_recolor1(edges[dl]);
+		edges[dl] = _dl;
+		byte _lf = edge_recolor1(edges[rf]);
+		edges[rf] = edge_recolor1(edges[rb]);
+		edges[rb] = edge_recolor1(edges[lb]);
+		edges[lb] = edge_recolor1(edges[lf]);
+		edges[lf] = _lf;
+}
+
+
+
+void reset()
+{
+    for (int i=0; i<8; i++)
+    {   corners[i]=i;
+    }
+    for (int i=0; i<12; i++)
+    {   edges[i]=i;
+    }
+}
+
+void randompattern()
+{
+    reset();
+    for (int i=0; i<100; i++)
+    {   turn(Random(15));
+    }
+}
+
+bool buildcubefromfaces()
+{
+    // build corners
+    unsigned int cornersfound=0;
+    unsigned int edgesfound=0;
+    unsigned int bit1 = 1;
+
+    for (byte co=0; co<8; co++)
+    {   byte a=allcolors[cornercubiefaces[co*3+0]];
+        byte b=allcolors[cornercubiefaces[co*3+1]];
+        byte c=allcolors[cornercubiefaces[co*3+2]];
+        for (byte i=0; i<8; i++)
+        {
+            byte x = cornercubiecolors[3*i+0];
+            byte y = cornercubiecolors[3*i+1];
+            byte z = cornercubiecolors[3*i+2];
+            if (a==x && ((b==y && c==z) || (b==z && c==y)) )
+            {
+                corners[co] = i;
+                cornersfound |= (bit1<<i);
+                break;
+            }
+            else if (b==x && ((a==y && c==z) || (a==z && c==y)) )
+            {
+                corners[co] = i + 0x10;
+                cornersfound |= (bit1<<i);
+                break;
+            }
+            else if (c==x && ((a==y && b==z) || (a==z && b==y)) )
+            {
+                corners[co] = i + 0x20;
+                cornersfound |= (bit1<<i);
+                break;
+            }
+        }
+    }
+    // build edges
+    for (byte e=0; e<12; e++)
+    {   byte a=allcolors[edgecubiefaces[e*2+0]];
+        byte b=allcolors[edgecubiefaces[e*2+1]];
+        for (byte i=0; i<12; i++)
+        {   byte x = edgecubiecolors[2*i+0];
+            byte y = edgecubiecolors[2*i+1];
+            if (a==x && b==y)
+            {   edges[e] = i;
+                edgesfound |= (bit1<<i);
+                break;
+            }
+            else if (a==y && b==x)
+            {   edges[e] = i + 0x10;
+                edgesfound |= (bit1<<i);
+                break;
+            }
+        }
+    }
+
+    if (cornersfound!=0x00ff || edgesfound!=0x0fff) return false;
+
+    // because the scanning left the cube twisted, do this twist in the model also
+    turn (FACETURN_R);
+    turn (FACETURN_Li);
+    turn (FACETURN_F);
+    turn (FACETURN_Bi);
+
+    return true;
+}
+
+
+int edgecubiepositionandflip(int cubie)
+{
+    for (int i=0; i<12; i++)
+    {   if ((edges[i] & 0x0f) == cubie)
+        {   return (i*2) + (edges[i]>>4);
+        }
+    }
+    return 0;
+}
+
+int edgecubieposition(int cubie)
+{
+		return edgecubiepositionandflip(cubie)/2;
+}
+
+int cornercubiepositionandtwist(int cubie)
+{
+    for (int i=0; i<8; i++)
+    {   if ((corners[i] & 0x0f) == cubie)
+        {   return (i*3) + (corners[i]>>4);
+        }
+    }
+    return 0;
+}
+
+int cornercubieposition(int cubie)
+{
+		return cornercubiepositionandtwist(cubie) / 3;
+}
+
+
+int avoid(int block, int posandflip)
+{
+		if (posandflip>=block) return posandflip-2;
+		return posandflip;
+}
+
+int ll_flip(int edgecubie)
+{
+		switch (edgecubie&0x0f)
+		{
+		case dl:
+		case dr:
+			return edgecubie>>4;
+		case df:
+		case db:
+			return (edgecubie>>4) ^ 1;
+		}
+		return 0;
+}
+
+int perm2index2(int i0, int i1)
+{
+		if (i1==1) return 0;
+		else       return 1;
+}
+
+int perm2index3(int i0, int i1, int i2)
+{
+		if (i2==2)
+		{	return perm2index2(i0,i1);
+		}
+		else if (i1==2)
+		{	return 3-perm2index2(i0,i2);
+		}
+		else  // i0==2
+		{   return 4+perm2index2(i1,i2);
+		}
+}
+
+int perm2index4(int i0, int i1, int i2, int i3)
+{
+		if (i3==3)
+		{	return perm2index3(i0,i1,i2);
+		}
+		else if (i2==3)
+		{   return 11-perm2index3(i0,i1,i3);
+		}
+		else if (i1==3)
+		{   return 12+perm2index3(i0,i2,i3);
+		}
+		else   // i0==3
+		{	return 23-perm2index3(i1,i2,i3);
+		}
+}
+
+int facesym2algsym[] = { 0, 3, 2, 1,     4,7,6,5 };
+int mtb[]= { 0,2,1 };
+
+int compute_fingerprint(int& sym, int phase)
+{
+		int epos;
+
+    // ----- PETRUS SOLUTION ----
+		switch (phase)
+		{
+		case 0:
+			// half cross
+			epos = edgecubiepositionandflip(ul);
+			return epos                                                   // E: 24 positions
+				   + avoid(epos,edgecubiepositionandflip(uf))*24;     // E: 22 positions
+		case 1:
+			// complete the 2x2x2
+			return edgecubiepositionandflip(lf)                    // E: 20 positions
+				 + cornercubiepositionandtwist(ulf)*20;            // C: 24 positions
+		case 2:
+			// extend to 2x2x3
+			epos = edgecubiepositionandflip(rf);
+			return  epos                                                 // E: 18 positions
+				  + avoid(epos,edgecubiepositionandflip(ur))*18    // E: 16 positions
+				  + cornercubiepositionandtwist(urf)*18*16;        // C: 21 positions
+		case 3:
+			// collect 3 more cubies for back side
+			epos = edgecubiepositionandflip(rb);
+			return  epos                                                 // E: 14 positions
+				  + avoid(epos,edgecubiepositionandflip(ub))*14    // E: 12 positions
+				  + cornercubiepositionandtwist(urb)*14*12;        // C: 18 positions
+		case 4:
+			// collect the missing 2 cubies for the first 2 layers
+			return edgecubiepositionandflip(lb)                    // E: 10 positions
+				 + cornercubiepositionandtwist(ulb)*10;            // C: 15 positions
+
+		case 5:
+			// prepare the last layer full solve by correctly positioning down face
+			{
+				int eidx = perm2index4(edges[dl]&0xf,edges[df]&0xf,edges[dr]&0xf,edges[db]&0xf);
+				int cidx = perm2index4(corners[dlf]&0xf,corners[drf]&0xf,corners[drb]&0xf,corners[dlb]&0xf);
+				return ll_perm_initialtwist[eidx*12+cidx/2];
+			}
+
+		case 6:
+			// do the last layer full solve
+			{
+				int eidx = perm2index4(edges[dl]&0xf,edges[df]&0xf,edges[dr]&0xf,edges[db]&0xf);
+				int cidx = perm2index4(corners[dlf]&0xf,corners[drf]&0xf,corners[drb]&0xf,corners[dlb]&0xf);
+				if (ll_perm_initialtwist[eidx*12+cidx/2]!=0) {
+          printstatus("NOT IN PHASE6");
+          for(;;);
+          return -1;
+        }
+
+        // determine the necessary symmetry of the solution algorithm
+				sym = facesym2algsym[ ll_perm_sequencesym[eidx*12+cidx/2] ];
+        int g = ll_perm_groups[eidx*12+cidx/2];        // 15 possibilities
+
+        // check the last layer twisting and flips
+				int flip1 = (edges[dl]>>4);
+        int flip2 = (edges[df]>>4);
+        int flip3 = (edges[dr]>>4);
+        int flip4 = (edges[db]>>4);
+				int twist1 = (corners[dlf]>>4);
+        int twist2 = (corners[drf]>>4);
+        int twist3 = (corners[drb]>>4);
+        int twist4 = (corners[dlb]>>4);
+
+        // must bring twist/flips to the position, the algorithm will solve
+        if (sym>=4)                   // mirror
+        {   int x = flip1; flip1=flip3; flip3=x;
+            x = twist1; twist1=mtb[twist2]; twist2=mtb[x];
+            x = twist3; twist3=mtb[twist4]; twist4=mtb[x];
+        }
+        for (int i=0; i<sym%4; i++)   // rotate
+        {   int x = flip1; flip1=flip2; flip2=flip3; flip3=flip4; flip4=x;
+            x = twist1; twist1=twist2; twist2=twist3; twist3=twist4; twist4=x;
+        }
+
+        // compute fingerprint
+				return g + (flip1+flip2*2+flip3*4)*15 + (twist1+twist2*3+twist3*9)*15*8;
+			}
+    }
+
+    return 0;
+}
+
+void add_turn_to_solution(byte t)
+{
+    // check if can join turn with already existing turn
+    if (solutionlength>=1)
+    {   byte last = solution[solutionlength-1];
+        // test if moving same side as in last move
+        int face1 = last/3;
+        int face2 = t/3;
+        if (face1 == face2)
+        {   // compute sum of movement
+            int r1 = last%3 + 1;
+            int r2 = t%3 + 1;
+            int sumr = (r1+r2) % 4;
+            if (sumr==0)
+            {   // moves cancel each other out
+                solutionlength--;
+                return;
+            }
+            else
+            {   // moves add up
+                int sum =  (face1*3) + sumr - 1;
+                solution[solutionlength-1] = sum;
+                return;
+            }
+        }
+    }
+    // no optimization possible
+    solution[solutionlength] = t;
+    solutionlength++;
+}
+
+bool findsolution()
+{
+    solutionlength=0;
+
+    for (int phase=0; phase<7; phase++)
+    {
+        int sym = 0;
+        int idx = compute_fingerprint(sym, phase);
+        if (idx<0 || sym<0) continue;
+
+        openfile(StrCat("petrus", NumToStr(phase),".bin"));
+
+        // read the index entry from the file
+        seektohalfbyte( (idx/4) * 4);
+        unsigned int target = readuint();
+
+        // go to the algorithm this index directs to
+        seektohalfbyte (target);
+        // because the index is not completely covered, must do a short sequential search
+        for (int i=0; i<idx%4; i++)
+        {   findandskiphalfbyteF();
+        }
+
+        byte t = readhalfbyte();
+        while (t!=0xf)
+        {
+            t = rotated[sym%4][t];
+            if (sym>=4) t = mirrored[t];
+
+            turn(t);
+            add_turn_to_solution(t);
+
+            t = readhalfbyte();
+        }
+
+        closefile();
+
+    }
+
+    // check if solution is valid
+    bool valid = true;
+    for (int i=0; i<8; i++)
+    {   if ((corners[i])!=i) valid = false;
+    }
+    for (int i=0; i<12; i++)
+    {   if ((edges[i])!=i) valid = false;
+    }
+
+    // undo the twisting to get back to original state
+    for (int i=solutionlength-1; i>=0; i--)
+    {   turn(inverted[solution[i]]);
+    }
+
+    return valid;
+}
+
+
+bool findbestsolution()
+{
+    int bestsolutionlength;
+
+    // check all rotational symmetric solutions
+    for (byte r=0; r<4; r++)
+    {   if (!findsolution()) return false;
+        if (r==0 || solutionlength < bestsolutionlength)
+        {   for (int i=0; i<solutionlength; i++)
+            {   bestsolution[i] = rotated[r][solution[i]];
+            }
+            bestsolutionlength = solutionlength;
+        }
+        rotate_and_recolor_cube();
+    }
+
+    // deliver best solution as the one solution found
+    ArraySubset (solution, bestsolution, 0,100);
+    solutionlength = bestsolutionlength;
+
+    return true;
+}
+
+/*
+
+void test_solution_quality()
+{
+    long tries=0;
+    long errors=0;
+    long turns=0;
+
+    for (;;)
+    {   randompattern();
+
+        if (!findbestsolution())
+//        if (!findsolution())
+        {   errors++;
+        }
+
+        tries++;
+        turns += solutionlength;
+        ResetScreen();
+        TextOut (0, LCD_LINE1,  "TRIES");
+        NumOut  (0, LCD_LINE2,  tries);
+        TextOut (0, LCD_LINE3,  "TURNS");
+        NumOut  (0, LCD_LINE4,  turns);
+        TextOut (0, LCD_LINE5,  "AVERAGE");
+        NumOut  (0, LCD_LINE6,  (turns*10)/tries);
+        if (errors>0)
+        {   TextOut (0, LCD_LINE7,  "ERRORS");
+            NumOut  (0, LCD_LINE8,  errors);
+        }
+     }
+}
+
+*/
+
+task main()
+{
+
+    // solution test run - calculate average turns for algorithm
+    // test_solution_quality();
+
+    printstatus("INIT...");
+    init_motors();
+
+    printstatus("PRESS BUTTON");
+    TextOut (0, LCD_LINE6, "MINIMUM CUBER");
+    for (;;)
+    {   // wait for button
+        while (!ButtonPressed(BTNCENTER,false));
+
+        unsigned long starttime = CurrentTick();
+
+        printstatus ("SCANNING...");
+        cubeorientation = 0;
+        if (!scan())
+        {   printstatus("SCAN ERROR");
+            displaycolors();
+            PlayTone (440,500);
+            continue;
+        }
+
+        unsigned long startcomputing = CurrentTick();
+
+        if (!buildcubefromfaces())
+        {   printstatus("READ ERROR");
+            displaycolors();
+            PlayTone (440,500);
+            continue;
+        }
+
+        printstatus("COMPUTING...");
+        if (!findbestsolution())
+        {   printstatus("SOLVE ERROR");
+            displaycolors();
+            PlayTone (440,500);
+            continue;
+        }
+
+        printstatus ("SOLVING...");
+        NumOut  (0, LCD_LINE6, solutionlength);
+        TextOut (20, LCD_LINE6, "MOVES");
+
+        unsigned long startsolving = CurrentTick();
+
+        if (solutionlength>0)
+        {   solution[solutionlength] = solution[solutionlength-1];
+            solution[solutionlength+1] = solution[solutionlength-1];
+            for (int i=0; i<solutionlength; i++)
+            {   faceturn3(solution[i], solution[i+1], solution[i+2]);
+            }
+        }
+
+        unsigned long endtime = CurrentTick();
+
+        printstatus ("DONE");
+        TextOut  (0, LCD_LINE1, time2str("SCAN  ",(startcomputing-starttime)/100) );
+        TextOut  (0, LCD_LINE2, time2str("THINK ",(startsolving-startcomputing)/100) );
+        TextOut  (0, LCD_LINE3, time2str("SOLVE ",(endtime-startsolving)/100) );
+        TextOut  (0, LCD_LINE4, time2str("TOTAL ",(endtime-starttime)/100) );
+        TextOut  (0, LCD_LINE6, StrCat("MOVES: "+NumToStr(solutionlength)) );
+        if (solutionlength>0)
+        {   TextOut  (0, LCD_LINE7, StrCat(NumToStr((endtime-startsolving)/solutionlength), "ms / TURN") );
+        }
+    }
+}
+
+
+
